@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mystic 15-Card Trial</title>
+<style>
+body {margin:0;padding:0;font-family:Arial,sans-serif;background:#101018;color:white;text-align:center;}
+.screen { display:none; padding:20px; }
+.screen.active { display:block; }
+h1 { font-size:1.5em; margin-bottom:10px; color:#00ffff; text-shadow:0 0 10px #00ffff; }
+p { font-size:0.95em; line-height:1.4em; margin:5px 0; }
+button {padding:10px 20px; margin:5px; border:none; border-radius:6px; cursor:pointer; background:#5050a0; color:white; font-size:16px;}
+button:hover { background:#7070d0;}
+#card-container {margin-top:20px; display:grid; gap:8px; justify-content:center; grid-template-columns: repeat(auto-fit, minmax(70px,1fr));}
+.card {width:70px; height:100px; background:#303040; border-radius:10px; display:flex; justify-content:center; align-items:center; font-size:14px; cursor:pointer; transition:0.3s; user-select:none; color:#00ffff;}
+.card.flipped {background:#d0d0d0; color:black; cursor:default;}
+#support-message {margin:10px; font-size:14px; color:#90e0ff; min-height:20px;}
+#status {margin-top:10px; font-size:16px; font-weight:bold; min-height:20px;}
+#retryBtn {display:none; padding:15px 30px; font-size:18px; background:#d05050; border-radius:10px;}
+#retryBtn:hover {background:#f07070;}
+</style>
+</head>
+<body>
+
+<div id="intro-screen" class="screen active">
+<h1>Welcome to Mystic 15-Card Trial</h1>
+<p>We have 15 cards: deer, eclipse, 4 babies, 4 wolves, 1 orange, 1 apple, 3 jaguars.</p>
+<p>Flip wisely. Survive dangers. Find the deer to win.</p>
+<button id="playBtn">Play</button>
+<button id="exitBtn">Exit</button>
+</div>
+
+<div id="game-screen" class="screen">
+<div id="support-message"></div>
+<div id="card-container"></div>
+<div id="status"></div>
+<button id="retryBtn">RETRY</button>
+</div>
+
+<script>
+const playBtn = document.getElementById('playBtn');
+const exitBtn = document.getElementById('exitBtn');
+const intro = document.getElementById('intro-screen');
+const game = document.getElementById('game-screen');
+const cardContainer = document.getElementById('card-container');
+const supportBox = document.getElementById('support-message');
+const statusBox = document.getElementById('status');
+const retryBtn = document.getElementById('retryBtn');
+
+let cards=[], flippedIndices=[], flipCount=0, orangeActive=false;
+let supportUsed={ baby:false, jaguar:false, wolf:false };
+let counters={ baby:0, jaguar:0, wolf:0 };
+let supportLocked = false;
+
+const baseDeck=['deer','eclipse','baby','baby','baby','baby','wolf','wolf','wolf','wolf','orange','apple','jaguar','jaguar','jaguar'];
+
+playBtn.onclick=startGame;
+exitBtn.onclick=()=>{ intro.innerHTML="<h2>Game exited. Refresh to play again.</h2>"; };
+retryBtn.onclick=startGame;
+
+function startGame(){
+    intro.classList.remove('active'); 
+    game.classList.add('active');
+
+    supportBox.innerHTML=""; 
+    statusBox.innerHTML=""; 
+    retryBtn.style.display='none';
+
+    flipCount=0; 
+    orangeActive=false; 
+    flippedIndices=[]; 
+    supportLocked = false;
+
+    supportUsed={ baby:false, jaguar:false, wolf:false };
+    counters={ baby:0,jaguar:0,wolf:0 };
+
+    cards=shuffle([...baseDeck]);
+    cardContainer.innerHTML="";
+
+    cards.forEach((_,i)=>{
+        const c=document.createElement('div');
+        c.classList.add('card');
+        c.dataset.index=i;
+        c.innerHTML=i+1;
+        c.onclick=()=>flipCard(i,c);
+        cardContainer.appendChild(c);
+    });
+}
+
+function flipCard(i,el){
+    if(el.classList.contains('flipped')) return;
+
+    if(cards[i]==='apple' && flipCount<2) cards[i]='baby';
+    if(cards[i]==='deer' && flipCount<2) cards[i]='eclipse';
+
+    el.classList.add('flipped');
+    let displayed=cards[i];
+
+    if(orangeActive && cards[i]==='baby') displayed='blank';
+    el.innerHTML=displayed;
+
+    flipCount++; 
+    flippedIndices.push(i);
+
+    if(cards[i]==='orange') {
+        orangeActive=true;
+        neutralizeBabies();
+        showStatus("Orange card picked! All baby cards are now blank and cannot cause loss.");
+    }
+
+    if(cards[i]==='baby' && !orangeActive) counters.baby++;
+    if(cards[i]==='wolf') counters.wolf++;
+    if(cards[i]==='jaguar') counters.jaguar++;
+
+    handleSupport();
+    adjustFinalCards();
+    checkWinLose();
+}
+
+function neutralizeBabies(){ 
+    cards=cards.map(c=>c==='baby'?'blank':c); 
+}
+
+function handleSupport(){
+    if (supportLocked) return; // ❗ don't replace or add new ones
+
+    // First support that triggers will lock
+    if(!supportUsed.baby && counters.baby===1){ 
+        supportUsed.baby=true;
+        let positions=findRealPositions(['baby','baby','wolf','wolf'],4); 
+        supportBox.innerHTML=`Support: avoid positions ${positions.join(', ')}`;
+        supportLocked = true;
+        return;
+    }
+    if(!supportUsed.jaguar && counters.jaguar===2){ 
+        supportUsed.jaguar=true;
+        let pos=findRealPositions(['jaguar'],1); 
+        supportBox.innerHTML=`Support: possible jaguar at ${pos.join(', ')}`;
+        supportLocked = true;
+        return;
+    }
+    if(!supportUsed.wolf && counters.wolf===2){ 
+        supportUsed.wolf=true;
+        let babies=findRealPositions(['baby'],3); 
+        supportBox.innerHTML=`Support: possible baby positions ${babies.join(', ')}`;
+        supportLocked = true;
+        return;
+    }
+}
+
+function adjustFinalCards(){
+    let remaining=cards.map((c,i)=> 
+        !document.querySelector(`[data-index='${i}']`).classList.contains('flipped') ? i : null
+    ).filter(x=>x!==null);
+
+    // ❗ Clear frozen support at exactly 6 cards remaining
+    if (remaining.length === 6) {
+        supportBox.innerHTML = "";
+    }
+
+    if(remaining.length===5){
+        let newSet=shuffle(['eclipse','eclipse','eclipse','eclipse','deer']);
+        remaining.forEach((i,j)=>cards[i]=newSet[j]);
+        let cardText=Object.entries(countTypes(newSet))
+            .map(([k,v])=>v+" "+k).join(", ");
+        showStatus("Remaining cards: "+cardText);
+    }
+}
+
+function countTypes(arr){ 
+    return arr.reduce((acc,c)=>{ acc[c]=acc[c]?acc[c]+1:1; return acc; },{}); 
+}
+
+function showStatus(msg){ 
+    statusBox.innerHTML=msg; 
+}
+
+function shuffle(a){ 
+    for(let i=a.length-1;i>0;i--){ 
+        let j=Math.floor(Math.random()*(i+1)); 
+        [a[i],a[j]]=[a[j],a[i]]; 
+    } 
+    return a; 
+}
+
+function disableAll(){ 
+    document.querySelectorAll('.card').forEach(c=>c.onclick=null); 
+}
+
+function win(){ 
+    showStatus("YOU WIN! Deer found!"); 
+    disableAll(); 
+    retryBtn.style.display='block'; 
+}
+
+function lose(msg){ 
+    showStatus("YOU LOSE: "+msg); 
+    disableAll(); 
+    retryBtn.style.display='block'; 
+}
+
+function findRealPositions(types,count){
+    let arr=[];
+    for(let i=0;i<cards.length;i++){
+        if(count===0) break;
+        if(types.includes(cards[i]) && 
+           !document.querySelector(`[data-index='${i}']`).classList.contains('flipped')) {
+            arr.push(i+1); 
+            count--;
+        }
+    }
+    return arr;
+}
+
+function checkWinLose(){
+    let flipped=flippedIndices.map(i=>cards[i]);
+    if(flipped.includes('deer')) return win();
+    if(flipped.includes('eclipse')) return lose('Flipped an Eclipse!');
+    if(counters.baby>=2) return lose('Picked 2 babies!');
+    if(counters.jaguar>=3) return lose('3 Jaguars!');
+    if(threeDangerConsec()) return lose('3 consecutive baby/wolf!');
+}
+
+// 3 consecutive baby/wolf ignoring blanks
+function threeDangerConsec(){
+    let danger=['baby','wolf'];
+    let sequence = flippedIndices.map(i=>cards[i]);
+    sequence = sequence.map(c=>c==='blank'?null:c);
+    for(let i=0;i<sequence.length-2;i++){
+        let trio=[sequence[i],sequence[i+1],sequence[i+2]];
+        if(trio.includes(null)) continue;
+        if(trio.some(x=>x==='baby') &&
+            trio.some(x=>x==='wolf') &&
+            trio.every(x=>danger.includes(x)))
+            return true;
+    }
+    return false;
+}
+</script>
+</body>
+</html>
